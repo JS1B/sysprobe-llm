@@ -1,0 +1,105 @@
+name: Boot Diagnostics
+description: Boot process, initramfs, and bootloader debugging
+platform: arch_linux
+
+tasks:
+  - name: Boot Time Analysis
+    command: systemd-analyze 2>/dev/null || echo "systemd-analyze not available"
+    category: boot
+    requires:
+      - systemd-analyze
+
+  - name: Boot Blame (Slow Services)
+    command: systemd-analyze blame 2>/dev/null | head -20 || echo "systemd-analyze not available"
+    category: boot
+    requires:
+      - systemd-analyze
+    max_lines: 25
+
+  - name: Boot Critical Chain
+    command: systemd-analyze critical-chain 2>/dev/null | head -30 || echo "systemd-analyze not available"
+    category: boot
+    requires:
+      - systemd-analyze
+    max_lines: 35
+
+  - name: Bootloader Info
+    command: |
+      echo "=== EFI Boot Entries ==="
+      efibootmgr -v 2>/dev/null | head -20 || echo "efibootmgr not available (not EFI?)"
+      echo ""
+      echo "=== Boot Partition ==="
+      findmnt /boot 2>/dev/null || findmnt /efi 2>/dev/null || echo "Boot partition not found"
+    category: boot
+    max_lines: 30
+
+  - name: Systemd-boot Config
+    command: |
+      echo "=== Loader Config ==="
+      cat /boot/loader/loader.conf 2>/dev/null || echo "No systemd-boot config"
+      echo ""
+      echo "=== Boot Entries ==="
+      ls -la /boot/loader/entries/ 2>/dev/null || echo "No boot entries directory"
+      for f in /boot/loader/entries/*.conf; do
+        [ -f "$f" ] && echo "--- $(basename $f) ---" && cat "$f"
+      done 2>/dev/null
+    category: boot
+    max_lines: 50
+
+  - name: GRUB Config
+    command: |
+      [ -f /boot/grub/grub.cfg ] && head -50 /boot/grub/grub.cfg || echo "No GRUB config"
+    category: boot
+    max_lines: 50
+
+  - name: Mkinitcpio Config
+    command: cat /etc/mkinitcpio.conf 2>/dev/null | grep -v '^#' | grep -v '^$'
+    category: boot
+    max_lines: 30
+
+  - name: Mkinitcpio Presets
+    command: |
+      echo "=== Available Presets ==="
+      ls -la /etc/mkinitcpio.d/ 2>/dev/null
+      echo ""
+      for f in /etc/mkinitcpio.d/*.preset; do
+        [ -f "$f" ] && echo "--- $(basename $f) ---" && cat "$f"
+      done 2>/dev/null
+    category: boot
+    max_lines: 40
+
+  - name: Kernel Command Line
+    command: cat /proc/cmdline
+    category: boot
+
+  - name: Available Kernels
+    command: |
+      echo "=== Installed Kernels ==="
+      pacman -Q | grep -E '^linux[0-9-]*\s' || pacman -Q linux
+      echo ""
+      echo "=== Kernel Images ==="
+      ls -la /boot/vmlinuz* /boot/initramfs* 2>/dev/null
+    category: boot
+    requires:
+      - pacman
+    max_lines: 20
+
+  - name: Kernel Messages (dmesg)
+    command: dmesg --level=err,warn 2>/dev/null | tail -40 || echo "dmesg requires root"
+    category: boot
+    max_lines: 45
+
+  - name: Boot Journal Errors
+    command: journalctl -b -p err --no-pager 2>/dev/null | tail -30
+    category: boot
+    requires:
+      - journalctl
+    max_lines: 35
+
+  - name: Previous Boot Failures
+    command: journalctl --list-boots 2>/dev/null | head -10 || echo "Journal not available"
+    category: boot
+    requires:
+      - journalctl
+    max_lines: 15
+

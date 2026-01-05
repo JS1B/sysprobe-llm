@@ -1,0 +1,9 @@
+# Ignore compiled binary
+/sysprobe
+
+# Ignore report output files
+sysprobe-report.md
+sysprobe-intro.md
+
+# Ensure source files are not ignored
+!cmd/sysprobe/main.go

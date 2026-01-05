@@ -1,0 +1,87 @@
+name: Audio Diagnostics
+description: PipeWire, PulseAudio, and ALSA debugging information
+platform: arch_linux
+
+tasks:
+  - name: Audio Hardware
+    command: |
+      echo "=== Sound Cards ==="
+      cat /proc/asound/cards 2>/dev/null || echo "No ALSA cards"
+      echo ""
+      echo "=== ALSA Devices ==="
+      aplay -l 2>/dev/null | head -20 || echo "aplay not available"
+    category: audio
+    max_lines: 30
+
+  - name: PipeWire Status
+    command: |
+      echo "=== PipeWire Services ==="
+      systemctl --user status pipewire pipewire-pulse wireplumber 2>&1 | grep -E '●|Active:|Main PID:'
+      echo ""
+      echo "=== PipeWire Version ==="
+      pipewire --version 2>/dev/null || echo "PipeWire not found"
+    category: audio
+    requires:
+      - systemctl
+
+  - name: PipeWire Devices
+    command: pw-cli list-objects Device 2>/dev/null | head -50 || echo "pw-cli not available"
+    category: audio
+    requires:
+      - pw-cli
+    max_lines: 50
+
+  - name: PipeWire Nodes
+    command: pw-cli list-objects Node 2>/dev/null | head -50 || echo "pw-cli not available"
+    category: audio
+    requires:
+      - pw-cli
+    max_lines: 50
+
+  - name: WirePlumber Status
+    command: wpctl status 2>/dev/null || echo "wpctl not available"
+    category: audio
+    requires:
+      - wpctl
+    max_lines: 50
+
+  - name: ALSA Mixer Settings
+    command: amixer 2>/dev/null | head -40 || echo "amixer not available"
+    category: audio
+    requires:
+      - amixer
+    max_lines: 40
+
+  - name: PulseAudio Sinks
+    command: pactl list sinks short 2>/dev/null || echo "pactl not available"
+    category: audio
+    requires:
+      - pactl
+
+  - name: PulseAudio Sources
+    command: pactl list sources short 2>/dev/null || echo "pactl not available"
+    category: audio
+    requires:
+      - pactl
+
+  - name: Audio Config Files
+    command: |
+      echo "=== Config Locations ==="
+      ls -la ~/.config/pipewire/ 2>/dev/null || echo "No user PipeWire config"
+      ls -la /etc/pipewire/ 2>/dev/null || echo "No system PipeWire config"
+      ls -la ~/.config/pulse/ 2>/dev/null || echo "No user PulseAudio config"
+    category: audio
+    max_lines: 20
+
+  - name: Audio Kernel Modules
+    command: lsmod | grep -E 'snd|hda|audio' | head -20
+    category: audio
+    max_lines: 20
+
+  - name: Audio Journal Errors
+    command: journalctl -b --no-pager -u pipewire -u pipewire-pulse -u wireplumber -p err 2>/dev/null | tail -20 || echo "No errors"
+    category: audio
+    requires:
+      - journalctl
+    max_lines: 25
+

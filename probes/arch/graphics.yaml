@@ -1,0 +1,107 @@
+name: Graphics Diagnostics
+description: GPU, display, and graphics driver information
+platform: arch_linux
+
+tasks:
+  - name: VGA Controllers
+    command: lspci | grep -E 'VGA|3D|Display'
+    category: graphics
+    requires:
+      - lspci
+
+  - name: GPU Kernel Modules
+    command: lsmod | grep -E 'amdgpu|nvidia|nouveau|i915|radeon|xe'
+    category: graphics
+
+  - name: DRM Info
+    command: cat /sys/class/drm/card*/device/vendor /sys/class/drm/card*/device/device 2>/dev/null || echo "No DRM devices found"
+    category: graphics
+
+  - name: Xrandr Displays
+    command: xrandr --query 2>/dev/null || echo "X11 not available"
+    category: graphics
+    requires:
+      - xrandr
+    tags:
+      - x11
+    max_lines: 50
+
+  - name: VA-API Info
+    command: vainfo 2>&1 | head -30
+    category: graphics
+    requires:
+      - vainfo
+    max_lines: 30
+
+  - name: VDPAU Info
+    command: vdpauinfo 2>&1 | head -30
+    category: graphics
+    requires:
+      - vdpauinfo
+    max_lines: 30
+
+  - name: Vulkan Info
+    command: vulkaninfo --summary 2>&1 | head -50
+    category: graphics
+    requires:
+      - vulkaninfo
+    max_lines: 50
+
+  - name: GLX Info
+    command: glxinfo | grep -E 'vendor|renderer|version|direct' | head -20
+    category: graphics
+    requires:
+      - glxinfo
+    tags:
+      - x11
+    max_lines: 20
+
+  - name: EGL Info
+    command: eglinfo 2>&1 | head -30 || echo "eglinfo not available"
+    category: graphics
+    requires:
+      - eglinfo
+    max_lines: 30
+
+  - name: AMD ROCm SMI
+    command: rocm-smi --showallinfo 2>&1 | head -50
+    category: graphics
+    requires:
+      - rocm-smi
+    max_lines: 50
+
+  - name: NVIDIA SMI
+    command: nvidia-smi 2>&1
+    category: graphics
+    requires:
+      - nvidia-smi
+    max_lines: 80
+
+  - name: NVIDIA Settings
+    command: nvidia-settings -q all 2>&1 | head -50
+    category: graphics
+    requires:
+      - nvidia-settings
+    max_lines: 50
+
+  - name: Intel GPU Top (snapshot)
+    command: timeout 1 intel_gpu_top -s 1 2>&1 || echo "intel_gpu_top not available or no Intel GPU"
+    category: graphics
+    requires:
+      - intel_gpu_top
+
+  - name: Mesa Info
+    command: "pacman -Qi mesa 2>/dev/null | grep -E 'Name|Version|Description' || echo 'mesa not installed via pacman'"
+    category: graphics
+    requires:
+      - pacman
+
+  - name: GPU Memory Info
+    command: "cat /sys/class/drm/card*/device/mem_info_vram_total 2>/dev/null || echo 'VRAM info not available'"
+    category: graphics
+
+  - name: Display Connectors
+    command: "for card in /sys/class/drm/card*; do echo \"=== $(basename $card) ===\"; ls -la $card-* 2>/dev/null | head -10; done"
+    category: graphics
+    max_lines: 30
+

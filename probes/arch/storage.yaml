@@ -1,0 +1,117 @@
+name: Storage Diagnostics
+description: Disk, filesystem, SMART, and mount debugging
+platform: arch_linux
+
+tasks:
+  - name: Block Device Layout
+    command: lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL
+    category: storage
+    max_lines: 30
+
+  - name: Disk Usage Detailed
+    command: df -hT
+    category: storage
+    max_lines: 25
+
+  - name: Inode Usage
+    command: df -i | head -20
+    category: storage
+    max_lines: 25
+
+  - name: Mount Points
+    command: findmnt -t ext4,btrfs,xfs,ntfs,vfat,exfat --real
+    category: storage
+    requires:
+      - findmnt
+    max_lines: 25
+
+  - name: Fstab Configuration
+    command: cat /etc/fstab | grep -v '^#' | grep -v '^$'
+    category: storage
+    max_lines: 20
+
+  - name: BTRFS Status
+    command: |
+      for mp in $(findmnt -t btrfs -n -o TARGET 2>/dev/null); do
+        echo "=== BTRFS: $mp ==="
+        btrfs filesystem df "$mp" 2>/dev/null
+        btrfs device stats "$mp" 2>/dev/null | head -10
+      done || echo "No BTRFS filesystems"
+    category: storage
+    requires:
+      - btrfs
+    max_lines: 40
+
+  - name: BTRFS Subvolumes
+    command: btrfs subvolume list / 2>/dev/null | head -20 || echo "Not a BTRFS root or btrfs not available"
+    category: storage
+    max_lines: 25
+
+  - name: ZFS Status
+    command: |
+      echo "=== ZFS Pools ==="
+      zpool status 2>/dev/null || echo "ZFS not installed or no pools"
+      echo ""
+      echo "=== ZFS Datasets ==="
+      zfs list 2>/dev/null | head -20 || true
+    category: storage
+    max_lines: 40
+
+  - name: LVM Status
+    command: |
+      echo "=== Physical Volumes ==="
+      pvs 2>/dev/null || echo "LVM not available or no PVs"
+      echo ""
+      echo "=== Volume Groups ==="
+      vgs 2>/dev/null || true
+      echo ""
+      echo "=== Logical Volumes ==="
+      lvs 2>/dev/null || true
+    category: storage
+    max_lines: 35
+
+  - name: RAID Status
+    command: |
+      echo "=== MD RAID ==="
+      cat /proc/mdstat 2>/dev/null || echo "No MD RAID"
+    category: storage
+    max_lines: 20
+
+  - name: SMART Health (first disk)
+    command: |
+      DISK=$(lsblk -d -n -o NAME | grep -E '^sd|^nvme' | head -1)
+      if [ -n "$DISK" ]; then
+        echo "=== SMART for /dev/$DISK ==="
+        smartctl -H /dev/$DISK 2>/dev/null || echo "smartctl requires root"
+      else
+        echo "No disk found"
+      fi
+    category: storage
+    max_lines: 20
+
+  - name: NVMe Health
+    command: |
+      for nvme in /dev/nvme[0-9]; do
+        [ -e "$nvme" ] || continue
+        echo "=== $nvme ==="
+        nvme smart-log "$nvme" 2>/dev/null | head -15 || echo "nvme-cli not available or requires root"
+      done || echo "No NVMe devices"
+    category: storage
+    requires:
+      - nvme
+    max_lines: 30
+
+  - name: Disk I/O Stats
+    command: iostat -x 1 1 2>/dev/null | head -30 || echo "iostat not available (install sysstat)"
+    category: storage
+    requires:
+      - iostat
+    max_lines: 35
+
+  - name: Storage Journal Errors
+    command: journalctl -b --no-pager -p err 2>/dev/null | grep -iE 'disk|nvme|sda|sdb|btrfs|ext4|xfs|mount|filesystem' | tail -15
+    category: storage
+    requires:
+      - journalctl
+    max_lines: 20
+

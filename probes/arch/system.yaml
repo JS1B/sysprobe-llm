@@ -1,0 +1,133 @@
+name: Arch Linux System Diagnostics
+description: Core system information and health checks for Arch Linux
+platform: arch_linux
+
+tasks:
+  - name: Kernel Version
+    command: uname -a
+    category: system
+
+  - name: OS Release
+    command: cat /etc/os-release
+    category: system
+
+  - name: Hostname Info
+    command: hostnamectl
+    category: system
+    requires:
+      - hostnamectl
+
+  - name: CPU Info
+    command: lscpu | head -30
+    category: hardware
+    max_lines: 30
+
+  - name: Memory Usage
+    command: free -h
+    category: hardware
+
+  - name: Disk Usage
+    command: df -h
+    category: hardware
+
+  - name: Block Devices
+    command: lsblk -o NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE
+    category: hardware
+
+  - name: Installed Packages Count
+    command: pacman -Q | wc -l
+    category: packages
+    requires:
+      - pacman
+
+  - name: Explicitly Installed Packages
+    command: pacman -Qe | head -100
+    category: packages
+    requires:
+      - pacman
+    max_lines: 100
+
+  - name: Foreign Packages (AUR)
+    command: pacman -Qm
+    category: packages
+    requires:
+      - pacman
+    max_lines: 100
+
+  - name: Orphan Packages
+    command: pacman -Qdt
+    category: packages
+    requires:
+      - pacman
+
+  - name: Failed Systemd Services
+    command: systemctl --failed
+    category: services
+    requires:
+      - systemctl
+
+  - name: Running Services
+    command: systemctl list-units --type=service --state=running --no-pager | head -50
+    category: services
+    requires:
+      - systemctl
+    max_lines: 50
+
+  - name: Recent Boot Log
+    command: journalctl -b -p err --no-pager | tail -50
+    category: logs
+    requires:
+      - journalctl
+    max_lines: 50
+
+  - name: System Uptime
+    command: uptime
+    category: system
+
+  - name: Loaded Kernel Modules
+    command: lsmod | head -30
+    category: system
+    max_lines: 30
+
+  - name: PCI Devices
+    command: lspci
+    category: hardware
+    requires:
+      - lspci
+    max_lines: 50
+
+  - name: USB Devices
+    command: lsusb
+    category: hardware
+    requires:
+      - lsusb
+    max_lines: 30
+
+  - name: Network Interfaces
+    command: ip addr
+    category: network
+    requires:
+      - ip
+
+  - name: Network Routes
+    command: ip route
+    category: network
+    requires:
+      - ip
+
+  - name: DNS Configuration
+    command: cat /etc/resolv.conf
+    category: network
+
+  - name: Active Network Connections
+    command: ss -tuln | head -30
+    category: network
+    requires:
+      - ss
+    max_lines: 30
+
+  - name: Environment Variables
+    command: env | grep -E '^(PATH|HOME|USER|SHELL|TERM|LANG|LC_|XDG_|DISPLAY|WAYLAND)' | sort
+    category: environment
+    max_lines: 30
+

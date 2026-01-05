@@ -1,0 +1,101 @@
+name: Power Management Diagnostics
+description: Power, suspend, battery, and thermal debugging
+platform: arch_linux
+
+tasks:
+  - name: Power Profile
+    command: |
+      echo "=== Power Profile ==="
+      powerprofilesctl get 2>/dev/null || echo "power-profiles-daemon not available"
+      powerprofilesctl list 2>/dev/null || true
+    category: power
+    max_lines: 15
+
+  - name: TLP Status
+    command: tlp-stat -s 2>/dev/null | head -30 || echo "TLP not installed"
+    category: power
+    requires:
+      - tlp-stat
+    max_lines: 35
+
+  - name: Battery Status
+    command: |
+      echo "=== Battery ==="
+      for bat in /sys/class/power_supply/BAT*; do
+        [ -d "$bat" ] || continue
+        echo "--- $(basename $bat) ---"
+        cat "$bat/status" 2>/dev/null && echo ""
+        cat "$bat/capacity" 2>/dev/null | xargs -I{} echo "Capacity: {}%"
+        cat "$bat/cycle_count" 2>/dev/null | xargs -I{} echo "Cycles: {}"
+        cat "$bat/health" 2>/dev/null | xargs -I{} echo "Health: {}"
+      done || echo "No battery found"
+    category: power
+    max_lines: 25
+
+  - name: AC Power Status
+    command: |
+      for ac in /sys/class/power_supply/AC* /sys/class/power_supply/ADP*; do
+        [ -d "$ac" ] && cat "$ac/online" 2>/dev/null | xargs -I{} echo "$(basename $ac): {}"
+      done || echo "No AC adapter found"
+    category: power
+
+  - name: CPU Frequency
+    command: |
+      echo "=== CPU Governor ==="
+      cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo "cpufreq not available"
+      echo ""
+      echo "=== Current Frequencies ==="
+      grep MHz /proc/cpuinfo | head -8
+    category: power
+    max_lines: 15
+
+  - name: Thermal Status
+    command: |
+      echo "=== Thermal Zones ==="
+      for zone in /sys/class/thermal/thermal_zone*; do
+        [ -d "$zone" ] || continue
+        TYPE=$(cat "$zone/type" 2>/dev/null)
+        TEMP=$(cat "$zone/temp" 2>/dev/null)
+        [ -n "$TEMP" ] && echo "$TYPE: $((TEMP/1000))°C"
+      done
+    category: power
+    max_lines: 15
+
+  - name: Suspend/Hibernate Status
+    command: |
+      echo "=== Sleep States ==="
+      cat /sys/power/state 2>/dev/null || echo "Sleep states not available"
+      echo ""
+      echo "=== Mem Sleep ==="
+      cat /sys/power/mem_sleep 2>/dev/null || echo "mem_sleep not available"
+    category: power
+
+  - name: ACPI Wakeup Devices
+    command: cat /proc/acpi/wakeup 2>/dev/null | head -20 || echo "ACPI wakeup not available"
+    category: power
+    max_lines: 25
+
+  - name: Recent Suspend/Resume
+    command: |
+      echo "=== Last Suspend Events ==="
+      journalctl -b --no-pager 2>/dev/null | grep -iE 'suspend|resume|hibernate|sleep' | tail -20
+    category: power
+    requires:
+      - journalctl
+    max_lines: 25
+
+  - name: Power Journal Errors
+    command: journalctl -b --no-pager -p err 2>/dev/null | grep -iE 'power|battery|thermal|acpi|suspend|hibernate' | tail -15
+    category: power
+    requires:
+      - journalctl
+    max_lines: 20
+
+  - name: Laptop Mode
+    command: |
+      echo "=== Laptop Mode ==="
+      cat /proc/sys/vm/laptop_mode 2>/dev/null | xargs -I{} echo "laptop_mode: {}"
+      systemctl status laptop-mode 2>&1 | grep -E '●|Active:' || echo "laptop-mode not installed"
+    category: power
+    max_lines: 10
+

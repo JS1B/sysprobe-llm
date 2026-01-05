@@ -1,0 +1,61 @@
+name: Bluetooth Diagnostics
+description: Bluetooth connectivity and pairing issues
+platform: arch_linux
+
+tasks:
+  - name: Bluetooth Service Status
+    command: |
+      echo "=== Bluetooth Service ==="
+      systemctl status bluetooth 2>&1 | grep -E '●|Active:|Main PID:'
+    category: bluetooth
+    requires:
+      - systemctl
+
+  - name: Bluetooth Controller
+    command: bluetoothctl show 2>/dev/null || echo "bluetoothctl not available"
+    category: bluetooth
+    requires:
+      - bluetoothctl
+    max_lines: 30
+
+  - name: Paired Devices
+    command: bluetoothctl devices 2>/dev/null || echo "bluetoothctl not available"
+    category: bluetooth
+    requires:
+      - bluetoothctl
+    max_lines: 20
+
+  - name: Bluetooth Hardware
+    command: |
+      echo "=== USB Bluetooth ==="
+      lsusb 2>/dev/null | grep -i bluetooth || echo "No USB Bluetooth found"
+      echo ""
+      echo "=== PCI Bluetooth ==="
+      lspci 2>/dev/null | grep -i bluetooth || echo "No PCI Bluetooth found"
+      echo ""
+      echo "=== Kernel Modules ==="
+      lsmod | grep -E 'bluetooth|btusb|btintel|btrtl|btbcm'
+    category: bluetooth
+    max_lines: 25
+
+  - name: Bluetooth RF Status
+    command: rfkill list bluetooth 2>/dev/null || rfkill list 2>/dev/null | grep -A2 -i bluetooth || echo "rfkill not available"
+    category: bluetooth
+    requires:
+      - rfkill
+    max_lines: 15
+
+  - name: Bluetooth Config
+    command: |
+      echo "=== /etc/bluetooth/main.conf ==="
+      cat /etc/bluetooth/main.conf 2>/dev/null | grep -v '^#' | grep -v '^$' | head -30 || echo "No config found"
+    category: bluetooth
+    max_lines: 35
+
+  - name: Bluetooth Journal
+    command: journalctl -b --no-pager -u bluetooth -p warning 2>/dev/null | tail -25
+    category: bluetooth
+    requires:
+      - journalctl
+    max_lines: 30
+

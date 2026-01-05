@@ -1,0 +1,103 @@
+name: Package Management Diagnostics
+description: Pacman, AUR, and package conflict debugging
+platform: arch_linux
+
+tasks:
+  - name: Pacman Config
+    command: cat /etc/pacman.conf 2>/dev/null | grep -v '^#' | grep -v '^$'
+    category: packages
+    max_lines: 40
+
+  - name: Enabled Repositories
+    command: grep -E '^\[' /etc/pacman.conf | grep -v options
+    category: packages
+
+  - name: Mirror Status
+    command: |
+      echo "=== Top Mirrors ==="
+      head -10 /etc/pacman.d/mirrorlist 2>/dev/null | grep -v '^#'
+    category: packages
+    max_lines: 15
+
+  - name: Package Cache Size
+    command: |
+      echo "=== Cache Size ==="
+      du -sh /var/cache/pacman/pkg/ 2>/dev/null
+      echo ""
+      echo "=== Cached Packages ==="
+      ls /var/cache/pacman/pkg/ 2>/dev/null | wc -l | xargs -I{} echo "{} packages cached"
+    category: packages
+
+  - name: Pacman Database Lock
+    command: |
+      if [ -f /var/lib/pacman/db.lck ]; then
+        echo "WARNING: Database lock exists!"
+        ls -la /var/lib/pacman/db.lck
+      else
+        echo "No database lock (OK)"
+      fi
+    category: packages
+
+  - name: Partially Upgraded Packages
+    command: |
+      echo "=== Checking for partial upgrades ==="
+      pacman -Qu 2>/dev/null | head -20 || echo "No upgrades available"
+    category: packages
+    requires:
+      - pacman
+    max_lines: 25
+
+  - name: Broken Dependencies
+    command: |
+      echo "=== Checking dependencies ==="
+      pacman -Dk 2>&1 | head -20 || echo "Dependency check failed"
+    category: packages
+    requires:
+      - pacman
+    max_lines: 25
+
+  - name: File Conflicts Check
+    command: pacman -Qkk 2>&1 | grep -v '0 altered files' | head -30 || echo "No altered files detected"
+    category: packages
+    requires:
+      - pacman
+    max_lines: 35
+
+  - name: Recently Installed
+    command: |
+      echo "=== Last 20 Installed Packages ==="
+      grep -E "installed|upgraded" /var/log/pacman.log 2>/dev/null | tail -20
+    category: packages
+    max_lines: 25
+
+  - name: Pacman Log Errors
+    command: grep -iE 'error|warning|fail' /var/log/pacman.log 2>/dev/null | tail -20
+    category: packages
+    max_lines: 25
+
+  - name: AUR Helpers
+    command: |
+      echo "=== Installed AUR Helpers ==="
+      for helper in yay paru pikaur aurman trizen; do
+        command -v $helper >/dev/null 2>&1 && $helper --version 2>/dev/null | head -1
+      done || echo "No AUR helper found"
+    category: packages
+
+  - name: Foreign Package Details
+    command: |
+      echo "=== Foreign (AUR) Packages ==="
+      pacman -Qm 2>/dev/null | head -30
+    category: packages
+    requires:
+      - pacman
+    max_lines: 35
+
+  - name: Package Groups
+    command: |
+      echo "=== Installed Groups ==="
+      pacman -Qg 2>/dev/null | cut -d' ' -f1 | sort -u | head -20
+    category: packages
+    requires:
+      - pacman
+    max_lines: 25
+

@@ -1,0 +1,122 @@
+name: Network Diagnostics
+description: Network connectivity, DNS, firewall, and VPN debugging
+platform: arch_linux
+
+tasks:
+  - name: Network Manager Status
+    command: |
+      echo "=== NetworkManager ==="
+      systemctl status NetworkManager 2>&1 | grep -E '●|Active:|Main PID:' || echo "NetworkManager not running"
+      echo ""
+      nmcli general status 2>/dev/null || echo "nmcli not available"
+    category: network
+    requires:
+      - systemctl
+
+  - name: Network Connections
+    command: nmcli connection show 2>/dev/null || echo "nmcli not available"
+    category: network
+    requires:
+      - nmcli
+    max_lines: 20
+
+  - name: WiFi Networks
+    command: nmcli device wifi list 2>/dev/null | head -20 || echo "No WiFi or nmcli not available"
+    category: network
+    requires:
+      - nmcli
+    max_lines: 25
+
+  - name: Interface Details
+    command: |
+      echo "=== All Interfaces ==="
+      ip -br addr
+      echo ""
+      echo "=== Wireless Info ==="
+      iw dev 2>/dev/null || echo "iw not available"
+    category: network
+    requires:
+      - ip
+    max_lines: 30
+
+  - name: DNS Resolution
+    command: |
+      echo "=== resolv.conf ==="
+      cat /etc/resolv.conf
+      echo ""
+      echo "=== systemd-resolved ==="
+      resolvectl status 2>/dev/null | head -20 || echo "systemd-resolved not active"
+      echo ""
+      echo "=== DNS Test ==="
+      host google.com 2>/dev/null || nslookup google.com 2>/dev/null || echo "DNS lookup failed"
+    category: network
+    max_lines: 40
+
+  - name: Routing Table
+    command: ip route show
+    category: network
+    requires:
+      - ip
+    max_lines: 20
+
+  - name: Firewall Status (nftables)
+    command: |
+      echo "=== nftables ==="
+      nft list ruleset 2>/dev/null | head -30 || echo "nftables not configured or requires root"
+    category: network
+    max_lines: 35
+
+  - name: Firewall Status (iptables)
+    command: |
+      echo "=== iptables ==="
+      iptables -L -n 2>/dev/null | head -30 || echo "iptables requires root"
+    category: network
+    max_lines: 35
+
+  - name: UFW Status
+    command: ufw status verbose 2>/dev/null || echo "UFW not installed"
+    category: network
+    requires:
+      - ufw
+    max_lines: 20
+
+  - name: Open Ports
+    command: ss -tlnp 2>/dev/null | head -30 || echo "ss not available"
+    category: network
+    requires:
+      - ss
+    max_lines: 35
+
+  - name: Active Connections
+    command: ss -tnp 2>/dev/null | head -30 || echo "ss not available"
+    category: network
+    requires:
+      - ss
+    max_lines: 35
+
+  - name: VPN Status
+    command: |
+      echo "=== WireGuard ==="
+      wg show 2>/dev/null || echo "No WireGuard interfaces or requires root"
+      echo ""
+      echo "=== OpenVPN ==="
+      pgrep -a openvpn 2>/dev/null || echo "OpenVPN not running"
+    category: network
+    max_lines: 30
+
+  - name: Network Kernel Parameters
+    command: |
+      echo "=== Key Network Sysctls ==="
+      sysctl net.ipv4.ip_forward 2>/dev/null
+      sysctl net.ipv6.conf.all.forwarding 2>/dev/null
+      sysctl net.ipv4.conf.all.rp_filter 2>/dev/null
+    category: network
+    max_lines: 10
+
+  - name: Network Journal Errors
+    command: journalctl -b --no-pager -u NetworkManager -u systemd-networkd -u systemd-resolved -p err 2>/dev/null | tail -20
+    category: network
+    requires:
+      - journalctl
+    max_lines: 25
+

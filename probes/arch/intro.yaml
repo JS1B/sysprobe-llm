@@ -1,0 +1,75 @@
+name: System Introduction
+description: Concise system summary for LLM chat context
+platform: arch_linux
+
+tasks:
+  - name: System Summary
+    command: |
+      echo "=== System Overview ==="
+      echo "Hostname: $(hostname)"
+      echo "User: $(whoami)"
+      echo "Kernel: $(uname -r)"
+      echo "Arch: $(uname -m)"
+      source /etc/os-release 2>/dev/null && echo "OS: $PRETTY_NAME"
+      echo "Uptime: $(uptime -p)"
+      echo ""
+      echo "=== Hardware ==="
+      echo "CPU: $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | xargs)"
+      echo "Cores: $(nproc)"
+      echo "RAM: $(free -h | awk '/^Mem:/{print $2}')"
+      echo "GPU: $(lspci 2>/dev/null | grep -E 'VGA|3D|Display' | cut -d: -f3 | head -1 | xargs)"
+      echo ""
+      echo "=== Environment ==="
+      echo "Shell: $SHELL"
+      echo "Desktop: ${XDG_CURRENT_DESKTOP:-unknown}"
+      echo "Session: ${XDG_SESSION_TYPE:-unknown}"
+      echo "Display: ${WAYLAND_DISPLAY:-${DISPLAY:-none}}"
+    category: intro
+
+  - name: Package Manager State
+    command: |
+      echo "Installed packages: $(pacman -Q 2>/dev/null | wc -l)"
+      echo "Explicitly installed: $(pacman -Qe 2>/dev/null | wc -l)"
+      echo "AUR/Foreign: $(pacman -Qm 2>/dev/null | wc -l)"
+      echo "Orphans: $(pacman -Qdt 2>/dev/null | wc -l)"
+      LAST_UPDATE=$(grep -E "upgraded|installed" /var/log/pacman.log 2>/dev/null | tail -1 | cut -d'[' -f2 | cut -d']' -f1)
+      echo "Last pacman activity: ${LAST_UPDATE:-unknown}"
+    category: intro
+    requires:
+      - pacman
+
+  - name: Key Software Versions
+    command: |
+      echo "=== Key Versions ==="
+      pacman -Q linux 2>/dev/null | awk '{print "Kernel pkg: "$2}'
+      pacman -Q mesa 2>/dev/null | awk '{print "Mesa: "$2}'
+      pacman -Q hyprland 2>/dev/null | awk '{print "Hyprland: "$2}'
+      pacman -Q pipewire 2>/dev/null | awk '{print "PipeWire: "$2}'
+      pacman -Q systemd 2>/dev/null | awk '{print "Systemd: "$2}'
+      gcc --version 2>/dev/null | head -1 | sed 's/^/GCC: /'
+      python --version 2>/dev/null | sed 's/^/Python: /'
+      go version 2>/dev/null | awk '{print "Go: "$3}'
+      rustc --version 2>/dev/null | sed 's/^rustc /Rust: /'
+      node --version 2>/dev/null | sed 's/^/Node: /'
+    category: intro
+    requires:
+      - pacman
+    max_lines: 20
+
+  - name: Current Issues Summary
+    command: |
+      echo "=== Potential Issues ==="
+      FAILED=$(systemctl --failed --no-legend 2>/dev/null | wc -l)
+      echo "Failed systemd units: $FAILED"
+      if [ "$FAILED" -gt 0 ]; then
+        systemctl --failed --no-legend 2>/dev/null | awk '{print "  - "$1}'
+      fi
+      ORPHANS=$(pacman -Qdt 2>/dev/null | wc -l)
+      [ "$ORPHANS" -gt 0 ] && echo "Orphan packages: $ORPHANS"
+      ERRORS=$(journalctl -b -p err --no-pager 2>/dev/null | wc -l)
+      echo "Boot errors in journal: $ERRORS"
+    category: intro
+    requires:
+      - systemctl
+    max_lines: 20
+

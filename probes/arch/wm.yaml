@@ -1,0 +1,146 @@
+name: Window Manager Diagnostics
+description: Hyprland, Wayland, and compositor information
+platform: arch_linux
+
+tasks:
+  - name: Wayland Display
+    command: echo "WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
+    category: wm
+    tags:
+      - wayland
+
+  - name: XDG Session Type
+    command: echo "XDG_SESSION_TYPE=$XDG_SESSION_TYPE"
+    category: wm
+
+  - name: Current Desktop
+    command: echo "XDG_CURRENT_DESKTOP=$XDG_CURRENT_DESKTOP"
+    category: wm
+
+  - name: Hyprland Version
+    command: hyprctl version
+    category: wm
+    requires:
+      - hyprctl
+    tags:
+      - hyprland
+
+  - name: Hyprland Monitors
+    command: hyprctl monitors
+    category: wm
+    requires:
+      - hyprctl
+    tags:
+      - hyprland
+
+  - name: Hyprland Workspaces
+    command: hyprctl workspaces
+    category: wm
+    requires:
+      - hyprctl
+    tags:
+      - hyprland
+
+  - name: Hyprland Devices
+    command: hyprctl devices
+    category: wm
+    requires:
+      - hyprctl
+    tags:
+      - hyprland
+    max_lines: 50
+
+  - name: Hyprland Layers
+    command: hyprctl layers
+    category: wm
+    requires:
+      - hyprctl
+    tags:
+      - hyprland
+    max_lines: 50
+
+  - name: Hyprland Config Check
+    command: "ls -la ~/.config/hypr/ 2>/dev/null || echo 'Hyprland config directory not found'"
+    category: wm
+    tags:
+      - hyprland
+
+  - name: Hyprland Log Errors
+    command: "cat ~/.local/share/hyprland/hyprland.log 2>/dev/null | grep -iE 'error|warn|fail' | tail -30 || echo 'No Hyprland log found'"
+    category: wm
+    tags:
+      - hyprland
+    max_lines: 30
+
+  - name: Sway Version
+    command: sway --version
+    category: wm
+    requires:
+      - sway
+    tags:
+      - sway
+
+  - name: Swaymsg Outputs
+    command: swaymsg -t get_outputs 2>/dev/null | head -50
+    category: wm
+    requires:
+      - swaymsg
+    tags:
+      - sway
+    max_lines: 50
+
+  - name: Waybar Status
+    command: pgrep -a waybar || echo "Waybar not running"
+    category: wm
+    tags:
+      - wayland
+
+  - name: Waybar Config Check
+    command: "ls -la ~/.config/waybar/ 2>/dev/null || echo 'Waybar config directory not found'"
+    category: wm
+    tags:
+      - wayland
+
+  - name: Active Wayland Compositor
+    command: "ps aux | grep -E 'hyprland|sway|wayfire|river|labwc' | grep -v grep | head -5"
+    category: wm
+    tags:
+      - wayland
+    max_lines: 10
+
+  - name: Wayland Protocols
+    command: "pacman -Qs wayland | head -20 || echo 'pacman not available'"
+    category: wm
+    requires:
+      - pacman
+    tags:
+      - wayland
+    max_lines: 20
+
+  - name: XWayland Status
+    command: pgrep -a Xwayland || echo "XWayland not running"
+    category: wm
+    tags:
+      - wayland
+
+  - name: Portal Services
+    command: "systemctl --user status xdg-desktop-portal xdg-desktop-portal-hyprland xdg-desktop-portal-gtk 2>&1 | grep -E 'Active:|●' | head -10"
+    category: wm
+    requires:
+      - systemctl
+    max_lines: 15
+
+  - name: Screen Sharing Check
+    command: "pactl list sources 2>/dev/null | grep -A2 'Name:.*monitor' | head -10 || echo 'PipeWire/PulseAudio not configured'"
+    category: wm
+    requires:
+      - pactl
+    max_lines: 15
+
+  - name: PipeWire Status
+    command: "systemctl --user status pipewire pipewire-pulse wireplumber 2>&1 | grep -E 'Active:|●' | head -10"
+    category: wm
+    requires:
+      - systemctl
+    max_lines: 10
+
