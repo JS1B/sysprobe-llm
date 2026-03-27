@@ -34,6 +34,125 @@ tasks:
     command: lsblk -o NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE
     category: hardware
 
+  - name: DMI / Machine Identity
+    command: |
+      read_dmi() {
+        file="/sys/class/dmi/id/$1"
+        if [ -r "$file" ]; then
+          tr -d '\000' < "$file" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+        fi
+      }
+      clean_value() {
+        value=$(printf '%s' "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+        case "$value" in
+          ""|"Not Applicable"|"N/A"|"n/a"|"None"|"none"|"System Product Name"|"System Version"|"Default string"|"Default String"|"To be filled by O.E.M."|"To Be Filled By O.E.M.")
+            ;;
+          *)
+            printf '%s' "$value"
+            ;;
+        esac
+      }
+      append_unique() {
+        list="$1"
+        item="$2"
+        if [ -z "$item" ]; then
+          printf '%s' "$list"
+        elif [ -z "$list" ]; then
+          printf '%s' "$item"
+        elif printf '%s\n' "$list" | grep -Fqx "$item"; then
+          printf '%s' "$list"
+        else
+          printf '%s\n%s' "$list" "$item"
+        fi
+      }
+      join_parts() {
+        printf '%s\n' "$1" | awk 'NF { printf("%s%s", sep, $0); sep=" " } END { print "" }'
+      }
+      vendor=$(clean_value "$(read_dmi sys_vendor)")
+      family=$(clean_value "$(read_dmi product_family)")
+      product=$(clean_value "$(read_dmi product_name)")
+      board_vendor=$(clean_value "$(read_dmi board_vendor)")
+      board_name=$(clean_value "$(read_dmi board_name)")
+      chassis_code=$(clean_value "$(read_dmi chassis_type)")
+      chassis_label=""
+      case "$chassis_code" in
+        3) chassis_label="Desktop" ;;
+        4) chassis_label="Low Profile Desktop" ;;
+        6) chassis_label="Mini Tower" ;;
+        7) chassis_label="Tower" ;;
+        8) chassis_label="Portable" ;;
+        9) chassis_label="Laptop" ;;
+        10) chassis_label="Notebook" ;;
+        11) chassis_label="Hand Held" ;;
+        12) chassis_label="Docking Station" ;;
+        13) chassis_label="All in One" ;;
+        14) chassis_label="Sub Notebook" ;;
+        15) chassis_label="Space-saving" ;;
+        16) chassis_label="Lunch Box" ;;
+        17) chassis_label="Main Server Chassis" ;;
+        18) chassis_label="Expansion Chassis" ;;
+        21) chassis_label="Peripheral Chassis" ;;
+        23) chassis_label="Rack Mount Chassis" ;;
+        24) chassis_label="Sealed-case PC" ;;
+        30) chassis_label="Tablet" ;;
+        31) chassis_label="Convertible" ;;
+        32) chassis_label="Detachable" ;;
+      esac
+      if [ -n "$chassis_code" ] && [ -z "$chassis_label" ]; then
+        chassis_label="Type $chassis_code"
+      fi
+      model_parts=""
+      model_parts=$(append_unique "$model_parts" "$vendor")
+      preferred_model="${product:-$family}"
+      model_parts=$(append_unique "$model_parts" "$preferred_model")
+      model=$(join_parts "$model_parts")
+      board=""
+      if [ -n "$board_vendor" ] && [ "$board_vendor" != "$vendor" ]; then
+        board="$board_vendor"
+      fi
+      if [ -n "$board_name" ] && [ "$board_name" != "$product" ] && [ "$board_name" != "$family" ]; then
+        if [ -n "$board" ]; then
+          board="$board $board_name"
+        else
+          board="$board_name"
+        fi
+      fi
+      if [ -z "$model" ]; then
+        model="${board:-unknown}"
+      fi
+      if [ -n "$board" ] || [ -n "$chassis_label" ]; then
+        extra=""
+        if [ -n "$board" ]; then
+          extra="$board"
+        fi
+        if [ -n "$chassis_label" ]; then
+          lower_chassis=$(printf '%s' "$chassis_label" | tr '[:upper:]' '[:lower:]')
+          if [ -n "$extra" ]; then
+            extra="$extra $lower_chassis chassis"
+          else
+            extra="$lower_chassis chassis"
+          fi
+        fi
+        if [ -n "$extra" ]; then
+          model="$model ($extra)"
+        fi
+      fi
+      echo "Model: $model"
+      [ -n "$vendor" ] && echo "Vendor: $vendor"
+      [ -n "$family" ] && [ "$family" != "$product" ] && echo "Family: $family"
+      [ -n "$product" ] && echo "Product: $product"
+      [ -n "$board" ] && echo "Board: $board"
+      [ -n "$chassis_label" ] && echo "Chassis: $chassis_label"
+      if command -v hostnamectl >/dev/null 2>&1; then
+        hostnamectl 2>/dev/null | awk '
+          /^[[:space:]]*Hardware Model:/ {
+            sub(/^[[:space:]]+/, "", $0)
+            print
+          }'
+      fi
+    category: hardware
+    max_lines: 15
+
   - name: Installed Packages Count
     command: pacman -Q | wc -l
     category: packages
