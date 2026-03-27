@@ -74,7 +74,10 @@ tasks:
     max_lines: 35
 
   - name: UFW Status
-    command: ufw status verbose 2>/dev/null || echo "UFW not installed"
+    command: |
+      echo "=== UFW ==="
+      ufw status verbose 2>/dev/null || echo "UFW not installed or requires root"
+    privilege: sudo
     category: network
     requires:
       - ufw
