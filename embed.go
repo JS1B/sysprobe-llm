@@ -1,4 +1,4 @@
-package sysprobe
+package sysprobellm
 
 import "embed"
 

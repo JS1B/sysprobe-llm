@@ -1,9 +1,23 @@
-# Ignore compiled binary
-/sysprobe
+# Compiled binaries
+/sysprobe-llm
 
-# Ignore report output files
-sysprobe-report.md
-sysprobe-intro.md
+# Report output files
+*.md
+!README.md
 
-# Ensure source files are not ignored
-!cmd/sysprobe/main.go
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Go build cache
+/vendor/
+
+# Ensure source files are tracked
+!cmd/sysprobe-llm/main.go

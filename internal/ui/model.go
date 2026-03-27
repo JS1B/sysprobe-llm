@@ -4,18 +4,21 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/pkrzeminski/sysprobe/internal/probe"
+	"github.com/pkrzeminski/sysprobe-llm/internal/probe"
 )
 
 // Message types
 type TaskStartMsg struct {
-	Name string
+	Index int
+	Name  string
 }
 
 type TaskDoneMsg struct {
+	Index  int
 	Result probe.TaskResult
 }
 
@@ -33,39 +36,42 @@ type TickMsg time.Time
 // Model represents the UI state
 type Model struct {
 	tasks        []probe.TaskResult
-	taskIndex    map[string]int
+	startedAt    []time.Time // wall time when task Index entered running; zero if not running
 	completed    int
 	total        int
+	workerCount  int
 	startTime    time.Time
 	quitting     bool
 	done         bool
 	waitingInput bool // Wait for user input before exiting
 	err          error
 	width        int
+	height       int
 	spinnerIdx   int
 	reportPath   string
 	tokenCount   int
 }
 
 // NewModel creates a new UI model
-func NewModel(taskNames []string) Model {
+func NewModel(taskNames []string, workerCount int) Model {
 	tasks := make([]probe.TaskResult, len(taskNames))
-	taskIndex := make(map[string]int)
+	startedAt := make([]time.Time, len(taskNames))
 
 	for i, name := range taskNames {
 		tasks[i] = probe.TaskResult{
 			Name:   name,
 			Status: probe.StatusPending,
 		}
-		taskIndex[name] = i
 	}
 
 	return Model{
-		tasks:     tasks,
-		taskIndex: taskIndex,
-		total:     len(taskNames),
-		startTime: time.Now(),
-		width:     80,
+		tasks:       tasks,
+		startedAt:   startedAt,
+		workerCount: workerCount,
+		total:       len(taskNames),
+		startTime:   time.Now(),
+		width:       80,
+		height:      0,
 	}
 }
 
@@ -98,6 +104,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
+		m.height = msg.Height
 
 	case TickMsg:
 		m.spinnerIdx = (m.spinnerIdx + 1) % len(SpinnerFrames)
@@ -106,26 +113,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case TaskStartMsg:
-		if idx, ok := m.taskIndex[msg.Name]; ok {
-			m.tasks[idx].Status = probe.StatusRunning
+		if msg.Index >= 0 && msg.Index < len(m.tasks) {
+			m.tasks[msg.Index].Status = probe.StatusRunning
+			m.startedAt[msg.Index] = time.Now()
 		}
 
 	case TaskDoneMsg:
-		if idx, ok := m.taskIndex[msg.Result.Name]; ok {
-			m.tasks[idx] = msg.Result
+		if msg.Index >= 0 && msg.Index < len(m.tasks) {
+			if msg.Index < len(m.startedAt) {
+				m.startedAt[msg.Index] = time.Time{}
+			}
+			m.tasks[msg.Index] = msg.Result
 			m.completed++
 		}
 
 	case AllDoneMsg:
 		m.done = true
-		// Update any remaining tasks with final results
-		for _, result := range msg.Results {
-			if idx, ok := m.taskIndex[result.Name]; ok {
-				m.tasks[idx] = result
-			}
+		n := len(m.tasks)
+		for i := 0; i < n && i < len(msg.Results); i++ {
+			m.tasks[i] = msg.Results[i]
 		}
-		// Wait for report to be generated
-		return m, nil
+		for i := range m.startedAt {
+			m.startedAt[i] = time.Time{}
+		}
+		m.completed = n
 
 	case ReportDoneMsg:
 		m.reportPath = msg.ReportPath
@@ -144,6 +155,7 @@ func (m Model) View() string {
 	}
 
 	var b strings.Builder
+	now := time.Now()
 
 	// Title
 	title := TitleStyle.Render("🔍 SysProbe Diagnostic Scanner")
@@ -161,7 +173,7 @@ func (m Model) View() string {
 	b.WriteString("\n")
 
 	// Footer
-	elapsed := time.Since(m.startTime).Round(time.Millisecond)
+	elapsed := now.Sub(m.startTime).Round(time.Millisecond)
 	footer := FooterStyle.Render(fmt.Sprintf("Elapsed: %s", elapsed))
 	b.WriteString(footer)
 
@@ -201,46 +213,97 @@ func (m Model) renderProgress() string {
 	bar := ProgressFull.Render(strings.Repeat("█", filled)) +
 		ProgressEmpty.Render(strings.Repeat("░", empty))
 
-	return fmt.Sprintf("  Progress: [%s] %d/%d (%d%%)", bar, m.completed, m.total, percent)
+	runningN := m.countRunning()
+	line := fmt.Sprintf("  Progress: [%s] %d/%d (%d%%)  ·  workers: %d  ·  active: %d",
+		bar, m.completed, m.total, percent, m.workerCount, runningN)
+	return line
 }
 
-// renderTable renders the task status table
+func (m Model) countRunning() int {
+	n := 0
+	for _, t := range m.tasks {
+		if t.Status == probe.StatusRunning {
+			n++
+		}
+	}
+	return n
+}
+
+// tableVisibleRows chooses how many task rows to show based on terminal height
+func (m Model) tableVisibleRows() int {
+	if m.height <= 0 {
+		return 15
+	}
+	// Title, progress, table header, footer, margins
+	overhead := 16
+	n := m.height - overhead
+	if n < 8 {
+		n = 8
+	}
+	if n > 45 {
+		n = 45
+	}
+	return n
+}
+
+// tableDisplayOrder returns task indices with unfinished first: running, then pending, then
+// finished (success / failed / skipped), each subgroup in stable probe order.
+func (m Model) tableDisplayOrder() []int {
+	n := len(m.tasks)
+	var running, pending, finished []int
+	for i := 0; i < n; i++ {
+		switch m.tasks[i].Status {
+		case probe.StatusRunning:
+			running = append(running, i)
+		case probe.StatusPending:
+			pending = append(pending, i)
+		default:
+			finished = append(finished, i)
+		}
+	}
+	order := make([]int, 0, n)
+	order = append(order, running...)
+	order = append(order, pending...)
+	order = append(order, finished...)
+	return order
+}
+
+// renderTable renders the task table; unfinished tasks stay at the top when the view is truncated.
 func (m Model) renderTable() string {
 	var rows []string
 
-	// Header
+	limit := m.tableVisibleRows()
+	order := m.tableDisplayOrder()
+	visible := order
+	hidden := 0
+	if len(visible) > limit {
+		hidden = len(visible) - limit
+		visible = visible[:limit]
+	}
+
 	header := fmt.Sprintf("  %-40s %-12s %-10s",
 		HeaderStyle.Render("Task"),
 		HeaderStyle.Render("Status"),
 		HeaderStyle.Render("Duration"))
 	rows = append(rows, header)
 	rows = append(rows, "  "+strings.Repeat("─", 64))
-
-	// Task rows (show last 15 tasks to fit in terminal)
-	startIdx := 0
-	if len(m.tasks) > 15 {
-		startIdx = len(m.tasks) - 15
+	if hidden > 0 {
+		rows = append(rows, FooterStyle.Render(fmt.Sprintf("  … %d more below (unfinished listed first)", hidden)))
 	}
 
-	for i := startIdx; i < len(m.tasks); i++ {
+	for _, i := range visible {
 		task := m.tasks[i]
-		row := m.renderTaskRow(task)
+		row := m.renderTaskRow(i, task)
 		rows = append(rows, row)
-	}
-
-	if startIdx > 0 {
-		rows = append(rows, FooterStyle.Render(fmt.Sprintf("  ... and %d more tasks above", startIdx)))
 	}
 
 	return strings.Join(rows, "\n")
 }
 
-// renderTaskRow renders a single task row
-func (m Model) renderTaskRow(task probe.TaskResult) string {
-	name := task.Name
-	if len(name) > 38 {
-		name = name[:35] + "..."
-	}
+// renderTaskRow renders a single task row (index shown for disambiguation)
+func (m Model) renderTaskRow(index int, task probe.TaskResult) string {
+	name := fmt.Sprintf("#%d %s", index+1, task.Name)
+	name = truncateRunes(name, 38)
 
 	var status string
 	switch task.Status {
@@ -258,11 +321,29 @@ func (m Model) renderTaskRow(task probe.TaskResult) string {
 	}
 
 	duration := ""
-	if task.Duration > 0 {
+	if task.Status == probe.StatusRunning {
+		if index < len(m.startedAt) && !m.startedAt[index].IsZero() {
+			duration = time.Since(m.startedAt[index]).Round(time.Millisecond).String()
+		}
+	} else if task.Duration > 0 {
 		duration = task.Duration.Round(time.Millisecond).String()
 	}
 
 	return fmt.Sprintf("  %-40s %-12s %-10s", name, status, duration)
+}
+
+func truncateRunes(s string, max int) string {
+	if max <= 0 {
+		return s
+	}
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	runes := []rune(s)
+	if max <= 3 {
+		return string(runes[:max])
+	}
+	return string(runes[:max-3]) + "..."
 }
 
 // SetReportPath sets the report output path
@@ -281,4 +362,3 @@ func max(a, b int) int {
 	}
 	return b
 }
-

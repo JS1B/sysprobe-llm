@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkrzeminski/sysprobe/internal/platform"
-	"github.com/pkrzeminski/sysprobe/internal/probe"
+	"github.com/pkrzeminski/sysprobe-llm/internal/platform"
+	"github.com/pkrzeminski/sysprobe-llm/internal/probe"
 )
 
 // MarkdownReport generates LLM-friendly markdown reports

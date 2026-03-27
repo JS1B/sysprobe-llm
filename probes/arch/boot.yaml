@@ -75,10 +75,10 @@ tasks:
   - name: Available Kernels
     command: |
       echo "=== Installed Kernels ==="
-      pacman -Q | grep -E '^linux[0-9-]*\s' || pacman -Q linux
+      pacman -Q | grep -E '^linux([0-9]+)?(-|$)' || echo "No installed kernel packages found"
       echo ""
       echo "=== Kernel Images ==="
-      ls -la /boot/vmlinuz* /boot/initramfs* 2>/dev/null
+      ls -la /boot/vmlinuz* /boot/initramfs* 2>/dev/null || echo "No kernel images found in /boot"
     category: boot
     requires:
       - pacman

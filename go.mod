@@ -1,4 +1,4 @@
-module github.com/pkrzeminski/sysprobe
+module github.com/pkrzeminski/sysprobe-llm
 
 go 1.25.5
 

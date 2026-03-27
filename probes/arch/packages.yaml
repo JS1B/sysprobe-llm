@@ -56,13 +56,6 @@ tasks:
       - pacman
     max_lines: 25
 
-  - name: File Conflicts Check
-    command: pacman -Qkk 2>&1 | grep -v '0 altered files' | head -30 || echo "No altered files detected"
-    category: packages
-    requires:
-      - pacman
-    max_lines: 35
-
   - name: Recently Installed
     command: |
       echo "=== Last 20 Installed Packages ==="

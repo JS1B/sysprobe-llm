@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pkrzeminski/sysprobe/internal/platform"
+	"github.com/pkrzeminski/sysprobe-llm/internal/platform"
 	"gopkg.in/yaml.v3"
 )
 
@@ -132,4 +132,3 @@ func (l *Loader) GetAllTasks() ([]Task, error) {
 
 	return l.FilterTasks(profiles), nil
 }
-

@@ -1,17 +1,20 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	sysprobe "github.com/pkrzeminski/sysprobe"
-	"github.com/pkrzeminski/sysprobe/internal/platform"
-	"github.com/pkrzeminski/sysprobe/internal/probe"
-	"github.com/pkrzeminski/sysprobe/internal/report"
-	"github.com/pkrzeminski/sysprobe/internal/ui"
+	sysprobellm "github.com/pkrzeminski/sysprobe-llm"
+	"github.com/pkrzeminski/sysprobe-llm/internal/platform"
+	"github.com/pkrzeminski/sysprobe-llm/internal/probe"
+	"github.com/pkrzeminski/sysprobe-llm/internal/report"
+	"github.com/pkrzeminski/sysprobe-llm/internal/ui"
 )
 
 var (
@@ -27,6 +30,16 @@ const (
 	ReportIntro
 )
 
+type indexedTask struct {
+	idx  int
+	task probe.Task
+}
+
+type indexedResult struct {
+	idx    int
+	result probe.TaskResult
+}
+
 func main() {
 	// CLI flags
 	outputFile := flag.String("o", "sysprobe-report.md", "Output file path for the report")
@@ -38,7 +51,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Printf("sysprobe %s\n", version)
+		fmt.Printf("sysprobe-llm %s\n", version)
 		os.Exit(0)
 	}
 
@@ -54,7 +67,7 @@ func main() {
 	plat := platform.Detect()
 
 	// Load probes
-	loader := probe.NewLoader(sysprobe.ProbeFS, plat)
+	loader := probe.NewLoader(sysprobellm.ProbeFS, plat)
 	tasks, err := loader.GetAllTasks()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading probes: %v\n", err)
@@ -118,7 +131,10 @@ func main() {
 }
 
 // runWithUI runs the diagnostic with the Bubble Tea UI
-func runWithUI(plat platform.Platform, tasks []probe.Task, workerCount int, outputFile string, mode ReportMode) []probe.TaskResult {
+func runWithUI(plat platform.Platform, tasks []probe.Task, workerCount int, outputFile string, mode ReportMode) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	// Create task name list for UI
 	taskNames := make([]string, len(tasks))
 	for i, t := range tasks {
@@ -126,68 +142,60 @@ func runWithUI(plat platform.Platform, tasks []probe.Task, workerCount int, outp
 	}
 
 	// Create model
-	model := ui.NewModel(taskNames)
+	model := ui.NewModel(taskNames, workerCount)
 
 	// Create program
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
-	// Results channel
-	resultsChan := make(chan probe.TaskResult, len(tasks))
-	var results []probe.TaskResult
-	var resultsMu sync.Mutex
+	resultsChan := make(chan indexedResult, len(tasks))
+	ordered := make([]probe.TaskResult, len(tasks))
+	var orderedMu sync.Mutex
 
-	// Start workers
 	var wg sync.WaitGroup
-	taskChan := make(chan probe.Task, len(tasks))
+	taskChan := make(chan indexedTask, len(tasks))
 
-	// Spawn workers
 	runner := probe.NewRunner(plat)
 	for i := 0; i < workerCount; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for task := range taskChan {
-				// Notify UI that task started
-				p.Send(ui.TaskStartMsg{Name: task.Name})
-
-				// Run task
-				result := runner.Run(task)
-				resultsChan <- result
-
-				// Notify UI that task is done
-				p.Send(ui.TaskDoneMsg{Result: result})
+			for wi := range taskChan {
+				p.Send(ui.TaskStartMsg{Index: wi.idx, Name: wi.task.Name})
+				result := runner.Run(ctx, wi.task)
+				resultsChan <- indexedResult{idx: wi.idx, result: result}
+				p.Send(ui.TaskDoneMsg{Index: wi.idx, Result: result})
 			}
 		}()
 	}
 
-	// Feed tasks
 	go func() {
-		for _, task := range tasks {
-			taskChan <- task
+		for i, task := range tasks {
+			taskChan <- indexedTask{idx: i, task: task}
 		}
 		close(taskChan)
 	}()
 
-	// Collect results
 	go func() {
 		wg.Wait()
 		close(resultsChan)
 	}()
 
-	// Collect all results and generate report in background
+	var uiFinished atomic.Bool
 	go func() {
-		for result := range resultsChan {
-			resultsMu.Lock()
-			results = append(results, result)
-			resultsMu.Unlock()
+		for o := range resultsChan {
+			orderedMu.Lock()
+			ordered[o.idx] = o.result
+			orderedMu.Unlock()
 		}
-		p.Send(ui.AllDoneMsg{Results: results})
+		if uiFinished.Load() {
+			return
+		}
+		orderedMu.Lock()
+		resultsCopy := make([]probe.TaskResult, len(ordered))
+		copy(resultsCopy, ordered)
+		orderedMu.Unlock()
 
-		// Generate report in background
-		resultsMu.Lock()
-		resultsCopy := make([]probe.TaskResult, len(results))
-		copy(resultsCopy, results)
-		resultsMu.Unlock()
+		p.Send(ui.AllDoneMsg{Results: resultsCopy})
 
 		rep := report.NewMarkdownReport(plat, resultsCopy)
 		var content string
@@ -205,22 +213,24 @@ func runWithUI(plat platform.Platform, tasks []probe.Task, workerCount int, outp
 
 		if err == nil {
 			_ = os.WriteFile(outputFile, []byte(content), 0644)
-			p.Send(ui.ReportDoneMsg{ReportPath: outputFile, TokenCount: tokenCount})
+			if !uiFinished.Load() {
+				p.Send(ui.ReportDoneMsg{ReportPath: outputFile, TokenCount: tokenCount})
+			}
 		}
 	}()
 
-	// Run UI
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "UI error: %v\n", err)
 	}
-
-	return results
+	uiFinished.Store(true)
+	cancel()
 }
 
 // runWithoutUI runs diagnostics without the TUI
 func runWithoutUI(plat platform.Platform, tasks []probe.Task, workerCount int) []probe.TaskResult {
 	fmt.Printf("Running %d diagnostic tasks...\n", len(tasks))
 
+	ctx := context.Background()
 	runner := probe.NewRunner(plat)
 	results := make([]probe.TaskResult, len(tasks))
 
@@ -234,17 +244,20 @@ func runWithoutUI(plat platform.Platform, tasks []probe.Task, workerCount int) [
 		go func() {
 			defer wg.Done()
 			for idx := range taskChan {
-				result := runner.Run(tasks[idx])
+				fmt.Printf("  → start [%d/%d] %s\n", idx+1, len(tasks), tasks[idx].Name)
+				t0 := time.Now()
+				result := runner.Run(ctx, tasks[idx])
+				dur := time.Since(t0).Round(time.Millisecond)
+
 				results[idx] = result
 
-				// Print progress
 				status := "✓"
 				if result.Status == probe.StatusFailed {
 					status = "✗"
 				} else if result.Status == probe.StatusSkipped {
 					status = "⊘"
 				}
-				fmt.Printf("  %s %s\n", status, result.Name)
+				fmt.Printf("  %s %s (%s)\n", status, result.Name, dur)
 			}
 		}()
 	}
@@ -258,4 +271,3 @@ func runWithoutUI(plat platform.Platform, tasks []probe.Task, workerCount int) [
 	wg.Wait()
 	return results
 }
-

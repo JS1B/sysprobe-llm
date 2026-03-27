@@ -3,12 +3,13 @@ package probe
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
 
-	"github.com/pkrzeminski/sysprobe/internal/platform"
+	"github.com/pkrzeminski/sysprobe-llm/internal/platform"
 )
 
 const (
@@ -53,8 +54,10 @@ func (r *Runner) CanRun(task Task) (bool, string) {
 	return true, ""
 }
 
-// Run executes a single task and returns the result
-func (r *Runner) Run(task Task) TaskResult {
+// Run executes a single task and returns the result.
+// ctx is the parent context (e.g. canceled when the UI exits); each task is also
+// limited to r.Timeout via a nested timeout.
+func (r *Runner) Run(ctx context.Context, task Task) TaskResult {
 	result := TaskResult{
 		Name:     task.Name,
 		Command:  task.Command,
@@ -70,12 +73,16 @@ func (r *Runner) Run(task Task) TaskResult {
 		return result
 	}
 
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), r.Timeout)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	// Per-task timeout layered on top of parent ctx (cancel or deadline)
+	execCtx, cancel := context.WithTimeout(ctx, r.Timeout)
 	defer cancel()
 
 	// Prepare command
-	cmd := exec.CommandContext(ctx, "sh", "-c", task.Command)
+	cmd := exec.CommandContext(execCtx, "sh", "-c", task.Command)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -91,15 +98,21 @@ func (r *Runner) Run(task Task) TaskResult {
 	result.Error = truncateOutput(stderr.String(), task.MaxLines, task.MaxBytes)
 
 	// Determine status
-	if ctx.Err() == context.DeadlineExceeded {
+	switch {
+	case errors.Is(execCtx.Err(), context.DeadlineExceeded):
 		result.Status = StatusFailed
 		result.Error = "Command timed out after " + r.Timeout.String()
-	} else if err != nil {
+	case errors.Is(execCtx.Err(), context.Canceled):
+		result.Status = StatusFailed
+		if result.Error == "" {
+			result.Error = "Canceled"
+		}
+	case err != nil:
 		result.Status = StatusFailed
 		if result.Error == "" {
 			result.Error = err.Error()
 		}
-	} else {
+	default:
 		result.Status = StatusSuccess
 	}
 
